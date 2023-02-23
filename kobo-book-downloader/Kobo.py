@@ -11,6 +11,8 @@ import re
 import urllib
 import uuid
 
+import colorama
+
 # It was not possible to enter the entire captcha response on MacOS.
 # Importing readline changes the implementation of input() and solves the issue.
 # See https://stackoverflow.com/q/65735885 and https://stackoverflow.com/q/7357007.
@@ -55,7 +57,6 @@ class SessionWithTimeOut( requests.Session ):
 		return super().request( method, url, **kwargs )
 
 class Kobo:
-	Affiliate = "Kobo"
 	ApplicationVersion = "8.11.24971"
 	DefaultPlatformId = "00000000-0000-0000-0000-000000004000"
 	DisplayProfile = "Android"
@@ -85,7 +86,7 @@ class Kobo:
 
 	# The initial device authentication request for a non-logged in user doesn't require a user key, and the returned
 	# user key can't be used for anything.
-	def AuthenticateDevice( self, userKey: str = "" ) -> None:
+	def AuthenticateDevice( self, userKey: str = "", affiliate: str="Kobo" ) -> None:
 		Globals.Logger.debug( "Kobo.AuthenticateDevice" )
 
 		if len( Globals.Settings.DeviceId ) == 0:
@@ -94,7 +95,7 @@ class Kobo:
 			Globals.Settings.RefreshToken = ""
 
 		postData = {
-			"AffiliateName": Kobo.Affiliate,
+			"AffiliateName": affiliate,
 			"AppVersion": Kobo.ApplicationVersion,
 			"ClientKey": base64.b64encode( Kobo.DefaultPlatformId.encode() ).decode(),
 			"DeviceId": Globals.Settings.DeviceId,
@@ -158,13 +159,13 @@ class Kobo:
 		jsonResponse = response.json()
 		self.InitializationSettings = jsonResponse[ "Resources" ]
 
-	def __GetExtraLoginParameters( self ) -> Tuple[ str, str, str ]:
+	def __GetExtraLoginParameters( self, affiliate:str ) -> Tuple[ str, str, str ]:
 		Globals.Logger.debug( "Kobo.__GetExtraLoginParameters" )
 
 		signInUrl = self.InitializationSettings[ "sign_in_page" ]
 
 		params = {
-			"wsa": Kobo.Affiliate,
+			"wsa": affiliate,
 			"pwsav": Kobo.ApplicationVersion,
 			"pwspid": Kobo.DefaultPlatformId,
 			"pwsdid": Globals.Settings.DeviceId
@@ -179,7 +180,7 @@ class Kobo:
 		parsed = urllib.parse.urlparse( signInUrl )
 		koboSignInUrl = parsed._replace( query = None, path = "/ww/en/signin/signin" ).geturl()
 
-		match = re.search( r"""/signin/kobo\?workflowId=([0-9a-f\-]+)""", htmlResponse )
+		match = re.search( r"""/signin/.*\?workflowId=([0-9a-f\-]+)""", htmlResponse )
 		if match is None:
 			raise KoboException( "Can't find the workflow ID. The page format might have changed." )
 		workflowId = html.unescape( match.group( 1 ) )
@@ -191,14 +192,15 @@ class Kobo:
 
 		return koboSignInUrl, workflowId, requestVerificationToken
 
-	def Login( self, email: str, password: str, captcha: str ) -> None:
+	def Login( self, email: str, password: str, captcha: str, affiliate:str ) -> None:
 		Globals.Logger.debug( "Kobo.Login" )
 
-		signInUrl, workflowId, requestVerificationToken = self.__GetExtraLoginParameters()
+		Globals.Settings.Affiliate = affiliate
+		signInUrl, workflowId, requestVerificationToken = self.__GetExtraLoginParameters(affiliate)
 
 		postData = {
 			"LogInModel.WorkflowId": workflowId,
-			"LogInModel.Provider": Kobo.Affiliate,
+			"LogInModel.Provider": affiliate,
 			"ReturnUrl": "",
 			"__RequestVerificationToken": requestVerificationToken,
 			"LogInModel.UserName": email,
@@ -221,7 +223,7 @@ class Kobo:
 		Globals.Settings.UserId = parsedQueries[ "userId" ][ 0 ] # We don't call Settings.Save here, AuthenticateDevice will do that if it succeeds.
 		userKey = parsedQueries[ "userKey" ][ 0 ]
 
-		self.AuthenticateDevice( userKey )
+		self.AuthenticateDevice( userKey, affiliate )
 
 	def GetBookInfo( self, productId: str ) -> dict:
 		Globals.Logger.debug( "Kobo.GetBookInfo" )
@@ -361,8 +363,12 @@ class Kobo:
 
 		jsonResponse = self.__GetContentAccessBook( productId, displayProfile )
 		contentKeys = Kobo.__GetContentKeys( jsonResponse )
-		downloadUrl, hasDrm = Kobo.__GetDownloadInfo( productId, jsonResponse )
-
+		try:
+			downloadUrl, hasDrm = Kobo.__GetDownloadInfo( productId, jsonResponse )
+		except:
+			print( colorama.Fore.LIGHTYELLOW_EX + ( "Skipping unkown book type %s." % productId ) + colorama.Fore.RESET )
+			return
+	
 		temporaryOutputPath = outputPath + ".downloading"
 
 		try:

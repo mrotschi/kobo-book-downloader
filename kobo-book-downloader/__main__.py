@@ -28,6 +28,9 @@ def InitializeKoboApi() -> None:
 	if not Globals.Settings.IsLoggedIn():
 		email = input( "Waiting for your input. You can use Shift+Insert to paste from the clipboard. Ctrl+C aborts the program.\n\nKobo e-mail: " )
 		password = input( "Kobo password: " )
+		affiliate = input( "Choose your affiliate (e.g. Kobo, Fnac, ...). Press enter to use the default one (Kobo): " )
+		if not affiliate:
+			affiliate = "Kobo"
 
 		print( """
 Open https://authorize.kobo.com/signin in a private/incognito window in your browser, wait till the page
@@ -51,7 +54,7 @@ and paste it here.
 
 		print( "" )
 
-		Globals.Kobo.Login( email, password, captcha )
+		Globals.Kobo.Login( email, password, captcha, affiliate )
 
 def Main() -> None:
 	InitializeGlobals()
